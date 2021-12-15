@@ -2,5 +2,5 @@ outfiles/
 plots/
 .*/
 output
-*.root
+**/*.root
 postfit

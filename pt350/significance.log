@@ -1,0 +1,6 @@
+N_sig:  52.43500789843074
+N_bkg:  3007.7374572753906
+N_sig/sqrt(N_bkg):  0.9560957233026517
+sqrt(2*(N_sig+N_bkg)*ln(1+N_sig/N_bkg)-2*N_sig):  0.9533377143773446
+
+Significance: 0.677004
