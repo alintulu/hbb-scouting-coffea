@@ -30,6 +30,20 @@ labels = {
     "jrho": "rho",
 }
 
+pt_i = {
+        '350': '0',
+        '400': '1',
+        '450': '2',
+        '500': '3',
+        '550': '4',
+        '600': '5',
+        '675': '6',
+        '800': '7',
+        '1200': '8'
+        }
+
+pt_bins = ['350', '400', '450', '500', '550', '600', '675', '800', '1200']
+
 _tag = args.ddb_region
 
 colours = {
@@ -40,17 +54,19 @@ colours = {
     "QCD": ROOT.kGray+2 ,#ROOT.TColor.GetColor(250, 202, 255),
 }
 
-def getHistogram(tfile, name, variable, tag=_tag):
-    name = "{}_{}".format(name, tag)
+def getHistogram(tfile, name, variable, pt_bin1, tag=_tag):
+    name = "{}_{}_pt{}".format(name, tag, pt_i[pt_bin1])
     h = tfile.Get(name)
     if not h:
         raise Exception("Failed to load histogram {}.".format(name))
     return h
 
-def getFitHistogram(tfile, name):
-    h = tfile.Get(name)
+def getFitHistogram(tfile, name, pt_bin1):
+    histdirname = "shapes_fit_s" + "/ptbin{0}{1}".format(pt_i[pt_bin1], args.ddb_region) + "/" + name
+    h = tfile.Get(histdirname)
     if not h:
-        raise Exception("Failed to load histogram {}.".format(name))
+        raise Exception("Failed to load histogram {}.".format(histdirname))
+    h.Scale(7.0)
     return h
 
 
@@ -61,7 +77,7 @@ def getFitHistogram(tfile, name):
 # There, we take the data histogram from the control region and subtract all known
 # processes defined in simulation and define the remaining part as QCD. Then,
 # this shape is extrapolated into the signal region with a scale factor.
-def main(variable):
+def main(variable, pt_bin1, pt_bin2):
     tfile = ROOT.TFile(args.input, "READ")
     tfile_fit = ROOT.TFile(args.fit, "READ")
 
@@ -123,57 +139,45 @@ def main(variable):
     # Get histogram for each sample
     ##
 
-    Hbb = getHistogram(tfile, "ggF", variable)
+    Hbb = getFitHistogram(tfile_fit, "ggF", pt_bin1)
     for name in [
         "ZH",
         "WH",
         "ttH",
         "VBF",
     ]:
-        Hbb.Add(getHistogram(tfile, name, variable))
+        Hbb.Add(getFitHistogram(tfile_fit, name, pt_bin1))
 
-    histdirname = "shapes_fit_s"
-    if _tag == "pass":
-        histdirname += "/ptbin0pass"
-    elif _tag == "fail":
-        histdirname += "/ptbin0fail"
-    QCD = getFitHistogram(tfile_fit, histdirname + "/qcd")
-    QCD.Scale(7.0)
+    QCD = getFitHistogram(tfile_fit, "qcd", pt_bin1)
 
-    W = getHistogram(tfile, "Wjets", variable)
+    W = getFitHistogram(tfile_fit, "Wjets", pt_bin1)
 
-    Z = getHistogram(tfile, "Zjets", variable)
+    Z = getFitHistogram(tfile_fit, "Zjets", pt_bin1)
     for name in [
         "VV",
     ]:
-        Z.Add(getHistogram(tfile, name, variable))
+        Z.Add(getFitHistogram(tfile_fit, name, pt_bin1))
 
-    tt = getHistogram(tfile, "ttbar", variable)
+    tt = getFitHistogram(tfile_fit, "ttbar", pt_bin1)
     for name in [
         "singlet",
     ]:
-        tt.Add(getHistogram(tfile, name, variable))
+        tt.Add(getFitHistogram(tfile_fit, name, pt_bin1))
 
-    data = getHistogram(tfile, "data", variable)
+    data = getHistogram(tfile, "data", variable, pt_bin1)
     if (_tag == "pass"):
       for i in range(11, 15):
         data.SetBinContent(i, 0)
         data.SetBinError(i,0)
 
-    total_bkg = QCD.Clone("hnew")
-    total_bkg.Add(W)
-    total_bkg.Add(Z)
-    total_bkg.Add(tt)
+    total_bkg = getFitHistogram(tfile_fit, "total_background", pt_bin1)
 
     ##
     # Compute signal to background ratio
     ##
 
-    N_sig = Hbb.Integral(11,15)#0 #Hbb.GetEntries()
-    N_bkg = total_bkg.Integral(11,15)#0 #total_bkg.GetEntries()
-    #for bin in range(11, 15):
-    #  N_sig += Hbb.GetBinContent(bin)
-    #  N_bkg += total_bkg.GetBinContent(bin)
+    N_sig = Hbb.Integral(11,15)
+    N_bkg = total_bkg.Integral(11,15)
 
     print("N_sig: ", N_sig)
     print("N_bkg: ", N_bkg)
@@ -207,46 +211,29 @@ def main(variable):
     ##
 
     stack_bkg_signal = ROOT.THStack("", "")
-    # TODOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOoo!!!!!!!!!!!!!!!!!!!!!!!!
     for x in [total_bkg, Hbb]:
        stack_bkg_signal.Add(x)  
 
-    stack_sum = stack_bkg_signal.GetStack().Last()
-
-    data_number_events = data.GetEntries()
-    #for bin in range(data.GetNbinsX()+1):
-    #    data_number_events += data.GetBinContent(bin)
+    N_data = data.GetEntries()
     
-    mc_data_diff_graph = data.Clone("ratio")
+    ratio = data.Clone("ratio")
     for bin in range(data.GetNbinsX()+1):
         data_v = data.GetBinContent(bin)
-        bkg_v = stack_sum.GetBinContent(bin)
-        sqrt_v = sqrt(data_number_events)
+        bkg_v = total_bkg.GetBinContent(bin)
+        sqrt_v = sqrt(N_data)
         rat_v = (data_v - bkg_v) / sqrt_v
         rat_err = data.GetBinError(bin) / sqrt_v
         print("{0} {1} {2} {3} {4} {5}".format(bin, data_v, bkg_v, sqrt_v, rat_v, rat_err))
-        mc_data_diff_graph.SetBinContent(bin, rat_v)
-        mc_data_diff_graph.SetBinError(bin, rat_err)
+        ratio.SetBinContent(bin, rat_v)
+        ratio.SetBinError(bin, rat_err)
         if (_tag == "fail"):
-           mc_data_diff_graph.SetBinError(bin, 1.0)
+           ratio.SetBinError(bin, 1.0)
         if (_tag == "pass"):
             if bin >= 11 and bin < 15:
-                mc_data_diff_graph.SetBinContent(bin, 0)
+                ratio.SetBinContent(bin, 0)
 
-    #stack_bkg_signal.Add(Hbb)  
-    #bin_center = array('f', [])
-    #mc_data_diff = array('f', [])
-    
-
-
-    #for bin in range(stack_sum.GetXaxis().GetNbins()):
-    #    bin_center.append(stack_sum.GetXaxis().GetBinCenter(bin))
-    #    if bin >= 11 and bin < 14:
-    #        mc_data_diff.append(0)
-    #    else:
-    #        mc_data_diff.append((data.GetBinContent(bin) - stack_sum.GetBinContent(bin)) / sqrt(data_number_events))
-
-    #mc_data_diff_graph = ROOT.TGraph(len(bin_center), bin_center, mc_data_diff)
+    # ratio.Add(total_bkg, -1)
+    # ratio.Scale(1/N_data)
 
     ##
     # Draw histograms, stack and data
@@ -255,9 +242,6 @@ def main(variable):
     c = ROOT.TCanvas("", "", 600, 700)
 
     pad1 = ROOT.TPad ('hist', '', 0., 0.3, 1.0, 1.0)
-    #pad1.SetBottomMargin(0.00001)
-    #pad1.SetTopMargin(0.1)
-    #pad1.SetBorderMode(0)
     pad1.SetFillColor(0)
     pad1.SetFillStyle(0)
     pad1.SetBottomMargin(0.03)
@@ -265,9 +249,6 @@ def main(variable):
 
     c.cd()
     pad2 = ROOT.TPad ('rat', 'Data/MC ratio', 0., 0.0,  1.0, 0.3)
-    #pad2.SetTopMargin(0.00001)
-    #pad2.SetBottomMargin(0.3)
-    #pad2.SetBorderMode(0)
     pad2.SetFillColor(0)
     pad2.SetFillStyle(0)
     pad2.SetTopMargin(0)
@@ -283,13 +264,13 @@ def main(variable):
         title = labels[name]
     else:
         title = name
-    mc_data_diff_graph.GetXaxis().SetTitle(title)
-    mc_data_diff_graph.GetYaxis().SetTitle("#frac{Data - Bkg}{#sigma_{Data}}")
-    mc_data_diff_graph.GetXaxis().SetLabelSize(0.1)
-    mc_data_diff_graph.GetYaxis().SetLabelSize(0.1)
-    mc_data_diff_graph.GetXaxis().SetTitleSize(0.1)
-    mc_data_diff_graph.GetYaxis().SetTitleSize(0.1)
-    mc_data_diff_graph.GetYaxis().SetTitleOffset(0.75)
+    ratio.GetXaxis().SetTitle(title)
+    ratio.GetYaxis().SetTitle("#frac{Data - Bkg}{#sigma_{Data}}")
+    ratio.GetXaxis().SetLabelSize(0.1)
+    ratio.GetYaxis().SetLabelSize(0.1)
+    ratio.GetXaxis().SetTitleSize(0.1)
+    ratio.GetYaxis().SetTitleSize(0.1)
+    ratio.GetYaxis().SetTitleOffset(0.75)
     stack_bkg_signal.GetXaxis().SetLabelSize(0)
     stack_bkg_signal.GetYaxis().SetTitle("Events / 7 GeV")
     stack_bkg_signal.SetMaximum(max(stack_bkg_signal.GetMaximum(), data.GetMaximum()) * 1.4)
@@ -319,7 +300,7 @@ def main(variable):
     latex.SetTextFont(42)
     latex.DrawLatex(0.6, 0.935, "2017 (13 TeV)")
     latex.DrawLatex(0.16, 0.935, "#bf{CMS}")
-    latex.DrawLatex(0.25, 0.80, "350 < p_{T} < 1200 GeV")
+    latex.DrawLatex(0.25, 0.80, pt_bin1 + " < p_{T} < " + pt_bin2 + " GeV")
     if _tag == "fail":
         latex.DrawLatex(0.25, 0.75, "Failing region")
     elif _tag == "pass":
@@ -327,24 +308,21 @@ def main(variable):
 
     pad2.cd()
     
-    #if (_tag == "pass"):
-    #   for i in range(11, 15):
-    #      mc_data_diff_graph.RemovePoint(i)
-    #mc_data_diff_graph.Draw("APE")
-    mc_data_diff_graph.Draw("E1P")
-    Hbb.Scale(sqrt(1/data_number_events))
+    ratio.Draw("E1P")
+    Hbb.Scale(sqrt(1/N_data))
     Hbb.Draw("HIST SAME")
-    mc_data_diff_graph.SetMaximum(max(mc_data_diff_graph.GetMaximum(), Hbb.GetMaximum()) * 1.1)
+    ratio.SetMaximum(max(ratio.GetMaximum(), Hbb.GetMaximum()) * 1.1)
     if (_tag == "fail"):
-       mc_data_diff_graph.SetMaximum(1.1)
+       ratio.SetMaximum(1.1)
 
     # Save
-    c.SaveAs(args.output_path + "/{}_2017_pt350_{}.png".format(variable,_tag))
+    c.SaveAs(args.output_path + "/{}_2017_ptbins_pt{}to{}_{}.png".format(variable,pt_bin1,pt_bin2,_tag))
 
 
 # Loop over all variable names and make a plot for each
 if __name__ == "__main__":
-    main("jmsoftdrop")
+    for i in range(len(pt_bins)-1):
+      main("jmsoftdrop", pt_bins[i], pt_bins[i+1])
     # for variable in labels.keys():
     #     main(variable)
 
